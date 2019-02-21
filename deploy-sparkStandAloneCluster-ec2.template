@@ -1,0 +1,396 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "This will deploy the postgres, kafka producer , kafka cluster managed by zookeeper and a spark driver application.",
+  "Parameters": {
+    "ec2Name": {
+      "Type": "String",
+	  "Default": "F5SparkStreaming"
+    },
+    "instanceType": {
+      "Type": "String",
+      "Default": "t2.xlarge",
+	  "AllowedValues": ["a1.medium","a1.large","a1.xlarge","a1.2xlarge","a1.4xlarge","m4.large","m4.xlarge","m4.2xlarge","m4.4xlarge","m4.10xlarge","m4.16xlarge","m5.large","m5.xlarge","m5.2xlarge","m5.4xlarge","m5.12xlarge","m5.24xlarge","m5a.large","m5a.xlarge","m5a.2xlarge","m5a.4xlarge","m5a.12xlarge","m5a.24xlarge","m5d.large","m5d.xlarge","m5d.2xlarge","m5d.4xlarge","m5d.12xlarge","m5d.24xlarge","t2.nano","t2.micro","t2.small","t2.medium","t2.large","t2.xlarge","t2.2xlarge","t3.nano","t3.micro","t3.small","t3.medium","t3.large","t3.xlarge","t3.2xlarge"]
+    },
+    "ebsVolumeSize": {
+      "Type": "String",
+      "Default": "40"
+    },
+	"sshKey": {
+            "Description": "Key pair for accessing the instance",
+            "Type": "AWS::EC2::KeyPair::KeyName"
+        },
+        "subnet1Az": {
+            "Description": "Name of an Availability Zone in this Region",
+            "Type": "AWS::EC2::AvailabilityZone::Name"
+        },
+        "subnet1CidrBlock": {
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "Must be a valid IP CIDR range of the form x.x.x.x/x.",
+            "Default": "10.1.1.0/24",
+            "Description": " The CIDR block for the second subnet which is compatible with the VPC CIDR block",
+            "MaxLength": 18,
+            "MinLength": 9,
+            "Type": "String"
+        },
+		 "vpcCidrBlock": {
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "Must be a valid IP CIDR range of the form x.x.x.x/x.",
+            "Default": "10.1.0.0/16",
+            "Description": " The CIDR block for the VPC",
+            "MaxLength": 18,
+            "MinLength": 9,
+            "Type": "String"
+        }
+  },
+  "Mappings": {
+    "AWSRegionArch2AMI": {
+      "us-east-1": {
+        "64": "ami-026e9f3a713727945"
+      },
+      "us-east-2": {
+        "64": "ami-0ec6d3241fb7776fe"
+      },
+      "us-west-1": {
+        "64": "ami-06ec1c533176de131"
+      },
+      "us-west-2": {
+        "64": "ami-0bbe6b35405ecebdb"
+      },
+      "eu-central-1": {
+        "64": "ami-078f9fe8bdaa81aa8"
+      },
+      "eu-west-1": {
+        "64": "ami-09547cd6f9856a79b"
+      },
+      "eu-west-2": {
+        "64": "ami-08efe1a8b5f18f381"
+      },
+      "eu-west-3": {
+        "64": "ami-042c578ede4ff3f33"
+      },
+      "ap-southeast-2": {
+        "64": "ami-0385d030f1b7df12c"
+      },
+      "ap-southeast-1": {
+        "64": "ami-0ccaa193408259c82"
+      },
+      "ap-northeast-1": {
+        "64": "ami-06525773f0332c0ca"
+      },
+      "ap-northeast-2": {
+        "64": "ami-0914a816a80ab8779"
+      },
+      "ap-south-1": {
+        "64": "ami-04b17f6875b4d9c29"
+      },
+      "sa-east-1": {
+        "64": "ami-0dd7e2894db509204"
+      },
+      "ca-central-1": {
+        "64": "ami-031ca32942ffbe25f"
+      }
+    }
+  },
+  "Resources": {
+    "InstanceSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+       "GroupDescription": "Enable remote access via port SSH (22), HTTPS (443) and HTTP (80) , expose 4049",
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": -1,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "icmp",
+            "FromPort": "-1",
+            "ToPort": "-1",
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "22",
+            "ToPort": "22",
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "80",
+            "ToPort": "80",
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "443",
+            "ToPort": "443",
+            "CidrIp": "0.0.0.0/0"
+          },
+		  {
+            "IpProtocol": "tcp",
+            "FromPort": "4049",
+            "ToPort": "4049",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+			"VpcId": {
+                    "Ref": "VPC"
+                }
+      }
+    },
+	"Subnet1": {
+            "Properties": {
+                "AvailabilityZone": {
+                    "Ref": "subnet1Az"
+                },
+                "CidrBlock": {
+                    "Ref": "subnet1CidrBlock"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Join": [
+                                " ",
+                                [
+                                    "Subnet 1:",
+                                    {
+                                        "Ref": "AWS::StackName"
+                                    }
+                                ]
+                            ]
+                        }
+                    }
+                ],
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Type": "AWS::EC2::Subnet"
+        },
+		 "IGW": {
+            "Properties": {
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Join": [
+                                " ",
+                                [
+                                    "Internet Gateway:",
+                                    {
+                                        "Ref": "AWS::StackName"
+                                    }
+                                ]
+                            ]
+                        }
+                    }
+                ]
+            },
+            "Type": "AWS::EC2::InternetGateway"
+        },
+		"IGWAttachment": {
+            "Properties": {
+                "InternetGatewayId": {
+                    "Ref": "IGW"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Type": "AWS::EC2::VPCGatewayAttachment"
+        },
+        "Route1Default": {
+            "Properties": {
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": {
+                    "Ref": "IGW"
+                },
+                "RouteTableId": {
+                    "Ref": "RouteTable1"
+                }
+            },
+            "Type": "AWS::EC2::Route"
+        },
+		"RouteTable1": {
+            "Properties": {
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Join": [
+                                " ",
+                                [
+                                    "Route Table 1:",
+                                    {
+                                        "Ref": "AWS::StackName"
+                                    }
+                                ]
+                            ]
+                        }
+                    }
+                ],
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Type": "AWS::EC2::RouteTable"
+        },
+		"Subnet1RouteTableAssociation": {
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "RouteTable1"
+                },
+                "SubnetId": {
+                    "Ref": "Subnet1"
+                }
+            },
+            "Type": "AWS::EC2::SubnetRouteTableAssociation"
+        },
+		"VPC": {
+            "Properties": {
+                "CidrBlock": {
+                    "Ref": "vpcCidrBlock"
+                },
+                "EnableDnsHostnames": "false",
+                "EnableDnsSupport": "true",
+                "InstanceTenancy": "default",
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Join": [
+                                " ",
+                                [
+                                    "Ubuntu VPC:",
+                                    {
+                                        "Ref": "AWS::StackName"
+                                    }
+                                ]
+                            ]
+                        }
+                    }
+                ]
+            },
+            "Type": "AWS::EC2::VPC"
+        },
+    "HTTPServer": {
+      "Type": "AWS::EC2::Instance",
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "config": {
+            "command": {
+              "a_update_apt": {
+                "command": "apt-get -y update"
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": {
+          "Fn::FindInMap": [
+            "AWSRegionArch2AMI",
+            {
+              "Ref": "AWS::Region"
+            },
+            "64"
+          ]
+        },
+        "InstanceType": {
+          "Ref": "instanceType"
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "VolumeSize": {
+                "Ref": "ebsVolumeSize"
+              }
+            }
+          }
+        ],
+        "KeyName": {
+          "Ref": "sshKey"
+        },
+        "Tags": [
+          {
+            "Key": "Server Instance",
+            "Value": {
+              "Ref": "AWS::StackId"
+            }
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Ref": "ec2Name"
+            }
+          }
+        ],
+		
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash -xe\n",
+                "# Install the files and packages from the metadata\n",
+                "apt-get -y update\n",
+				"apt-get -y install python-setuptools docker.io docker-compose\n",
+				"mkdir -p /dockerFiles \ncd /dockerFiles \ncurl https://raw.githubusercontent.com/bghalif5/sparkkafkatest/master/docker-compose-sparkmasterslave.yml > docker-compose.yml\n",
+				"sudo nohup docker-compose up > dockerStartup.log \n"
+              ]
+            ]
+          }
+        },
+        "NetworkInterfaces": [
+          {
+            "GroupSet": [
+              {
+                "Ref": "InstanceSecurityGroup"
+              }
+            ],
+            "Description": "Server:Internal",
+            "DeviceIndex": "0",
+            "AssociatePublicIpAddress": "true",
+            "DeleteOnTermination": "true",
+            "SubnetId": {
+              "Ref": "Subnet1"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "Region": {
+      "Description": "AWS Region",
+      "Value": {
+        "Ref": "AWS::Region"
+      }
+    },
+    "HTTPServerIP": {
+      "Description": "Ubuntu Spark/Kafka Server",
+      "Value": {
+        "Fn::GetAtt": [ "HTTPServer", "PrivateIp" ]
+      }
+    },
+	"StreamingMonitorURL" : {
+      "Value" : { "Fn::Join" : [ "", [ "http://", {"Fn::GetAtt" : [ "HTTPServer", "PublicIp" ]}, ":4049/" ] ]},
+      "Description" : "Access Spark URL to inspect the streaming"
+    },
+    "SparkMasterURL" : {
+      "Value" : { "Fn::Join" : [ "", [ "http://", {"Fn::GetAtt" : [ "HTTPServer", "PublicIp" ]}, ":8080/" ] ]},
+      "Description" : "Access Spark URL to inspect the spark master node"
+    },
+    "SparkWorker1URL" : {
+      "Value" : { "Fn::Join" : [ "", [ "http://", {"Fn::GetAtt" : [ "HTTPServer", "PublicIp" ]}, ":8081/" ] ]},
+      "Description" : "Access Spark URL to inspect the spark worker node 1"
+    },
+    "SparkWorker2URL" : {
+      "Value" : { "Fn::Join" : [ "", [ "http://", {"Fn::GetAtt" : [ "HTTPServer", "PublicIp" ]}, ":8082/" ] ]},
+      "Description" : "Access Spark URL to inspect the spark worker node 2"
+    }
+  }
+}
