@@ -1,0 +1,30 @@
+version: '3'
+services:
+    app-spark:
+        image: bghali/sparkcluster:latest
+        hostname: spark-local
+        ports:
+            - 4049:4040
+            - 8080:8080
+            - 7077:7077
+            - 8081:8081
+            - 8082:8082
+        environment:
+            - PUBLISH_RATE=10000
+            - PUBLISH_DELAY=true
+        links:
+            - "postgres-local"
+        depends_on:
+            - postgres-local
+        
+          
+    postgres-local: 
+        image: bghali/postgres:latest
+        hostname: postgres-local
+        expose:
+            - "5432"
+        volumes:
+            - data-volume:/var/lib/backup/data
+
+volumes:
+   data-volume:
